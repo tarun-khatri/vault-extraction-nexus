@@ -26,7 +26,7 @@ export interface TokenInfo {
   name: string;
   symbol: string;
   decimals: number;
-  balance: ethers.BigNumber;
+  balance: bigint;
   balanceUSD: number;
   chain: ChainType;
   supportsPermit: boolean;
@@ -108,7 +108,7 @@ export const getTokensByValue = async (
   );
   
   const tokens = (await Promise.all(tokenPromises)).filter(
-    token => token !== null && !token.balance.isZero()
+    token => token !== null && token.balance > 0n
   ) as TokenInfo[];
   
   // Sort by USD value (highest first)
