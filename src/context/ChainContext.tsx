@@ -12,6 +12,13 @@ interface ChainConfig {
   symbol: string;
   explorerUrl: string;
   rpcUrl: string;
+  isEVM: boolean;
+  tokenListUrl?: string;
+  nativeCurrency: {
+    name: string;
+    symbol: string;
+    decimals: number;
+  };
 }
 
 // Chain maps
@@ -23,6 +30,13 @@ const chainConfigs: Record<ChainType, ChainConfig> = {
     symbol: 'ETH',
     explorerUrl: 'https://etherscan.io',
     rpcUrl: 'https://mainnet.infura.io/v3/',
+    isEVM: true,
+    tokenListUrl: 'https://tokens.coingecko.com/ethereum/all.json',
+    nativeCurrency: {
+      name: 'Ethereum',
+      symbol: 'ETH',
+      decimals: 18
+    }
   },
   arbitrum: {
     name: 'Arbitrum',
@@ -31,6 +45,13 @@ const chainConfigs: Record<ChainType, ChainConfig> = {
     symbol: 'ARB',
     explorerUrl: 'https://arbiscan.io',
     rpcUrl: 'https://arb1.arbitrum.io/rpc',
+    isEVM: true,
+    tokenListUrl: 'https://tokens.coingecko.com/arbitrum-one/all.json',
+    nativeCurrency: {
+      name: 'Ethereum',
+      symbol: 'ETH',
+      decimals: 18
+    }
   },
   solana: {
     name: 'Solana',
@@ -39,6 +60,12 @@ const chainConfigs: Record<ChainType, ChainConfig> = {
     symbol: 'SOL',
     explorerUrl: 'https://explorer.solana.com',
     rpcUrl: 'https://api.mainnet-beta.solana.com',
+    isEVM: false,
+    nativeCurrency: {
+      name: 'Solana',
+      symbol: 'SOL',
+      decimals: 9
+    }
   },
   base: {
     name: 'Base',
@@ -47,6 +74,13 @@ const chainConfigs: Record<ChainType, ChainConfig> = {
     symbol: 'ETH',
     explorerUrl: 'https://basescan.org',
     rpcUrl: 'https://mainnet.base.org',
+    isEVM: true,
+    tokenListUrl: 'https://raw.githubusercontent.com/base-org/token-list/main/tokens/mainnet.json',
+    nativeCurrency: {
+      name: 'Ethereum',
+      symbol: 'ETH',
+      decimals: 18
+    }
   },
   bnb: {
     name: 'BNB Chain',
@@ -55,6 +89,13 @@ const chainConfigs: Record<ChainType, ChainConfig> = {
     symbol: 'BNB',
     explorerUrl: 'https://bscscan.com',
     rpcUrl: 'https://bsc-dataseed.binance.org',
+    isEVM: true,
+    tokenListUrl: 'https://tokens.coingecko.com/binance-smart-chain/all.json',
+    nativeCurrency: {
+      name: 'BNB',
+      symbol: 'BNB',
+      decimals: 18
+    }
   },
 };
 
