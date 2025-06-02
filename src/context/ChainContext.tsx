@@ -1,8 +1,7 @@
-
 import React, { createContext, useContext, useState, ReactNode } from 'react';
 
 // Define chains we support
-export type ChainType = 'ethereum' | 'arbitrum' | 'solana' | 'base' | 'bnb';
+export type ChainType = 'ethereum' | 'arbitrum' | 'solana' | 'base' | 'bnb' | 'holesky';
 
 // Chain configuration
 interface ChainConfig {
@@ -97,6 +96,21 @@ const chainConfigs: Record<ChainType, ChainConfig> = {
       decimals: 18
     }
   },
+  holesky: {
+    name: 'Holesky',
+    id: '0x4268',
+    icon: '🟦',
+    symbol: 'ETH',
+    explorerUrl: 'https://holesky.etherscan.io',
+    rpcUrl: 'https://ethereum-holesky.publicnode.com',
+    isEVM: true,
+    tokenListUrl: '',
+    nativeCurrency: {
+      name: 'Ethereum',
+      symbol: 'ETH',
+      decimals: 18
+    }
+  },
 };
 
 // Context type
@@ -114,7 +128,7 @@ const ChainContext = createContext<ChainContextType | undefined>(undefined);
 // Provider component
 export const ChainProvider = ({ children }: { children: ReactNode }) => {
   const [currentChain, setCurrentChain] = useState<ChainType>('ethereum');
-  const chains: ChainType[] = ['ethereum', 'arbitrum', 'solana', 'base', 'bnb'];
+  const chains: ChainType[] = ['ethereum', 'arbitrum', 'solana', 'base', 'bnb', 'holesky'];
 
   const setChain = (chain: ChainType) => {
     setCurrentChain(chain);

